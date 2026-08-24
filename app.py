@@ -1,85 +1,89 @@
-import streamlit as st
+import os
+import json
 import pandas as pd
+import streamlit as st
 import gspread
 from google.oauth2.service_account import Credentials
-from datetime import datetime
 
-# 1. Configuración de la página
-st.set_page_config(page_title="Dashboard de Alfonso José", page_icon="🎓", layout="wide")
+# Configuración de página
+st.set_page_config(page_title="Dashboard Alfonso José", page_icon="🎓", layout="wide")
 
-st.title("🎓 Dashboard Cloud — Alfonso José")
-st.markdown("---")
+# 1. Conexión segura a Google Sheets
+scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
 
-# Conexión a Google Sheets con google-auth
 @st.cache_resource
-def conectar_gsheets():
-    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-    creds = Credentials.from_service_account_file("credenciales.json", scopes=scopes)
+def conectar_sheets():
+    # Opción A: Intentar leer desde los Secrets de Streamlit Cloud
+    if "GOOGLE_CREDENTIALS_JSON" in st.secrets:
+        cred_data = st.secrets["GOOGLE_CREDENTIALS_JSON"]
+        if isinstance(cred_data, str):
+            cred_info = json.loads(cred_data)
+        else:
+            cred_info = dict(cred_data)
+        creds = Credentials.from_service_account_info(cred_info, scopes=scopes)
+
+    # Opción B: Intentar leer desde Variable de Entorno del sistema
+    elif "GOOGLE_CREDENTIALS_JSON" in os.environ:
+        cred_info = json.loads(os.environ["GOOGLE_CREDENTIALS_JSON"])
+        creds = Credentials.from_service_account_info(cred_info, scopes=scopes)
+
+    # Opción C: Respaldo Local (en tu Mac)
+    elif os.path.exists("credenciales.json"):
+        creds = Credentials.from_service_account_file("credenciales.json", scopes=scopes)
+
+    else:
+        st.error("❌ No se encontraron las credenciales de Google Sheets. Configura GOOGLE_CREDENTIALS_JSON en los Secrets de Streamlit.")
+        st.stop()
+
     client = gspread.authorize(creds)
-    sheet = client.open("Dashboard Alfonso Jose").sheet1
-    return sheet
+    return client.open("Dashboard Alfonso Jose")
 
-sheet = conectar_gsheets()
+# Conectar a la planilla
+sh = conectar_sheets()
+sheet_actividades = sh.worksheet("Actividades")
+sheet_etiquetas = sh.worksheet("Etiquetas")
+sheet_horario = sh.worksheet("Horario")
 
-def cargar_actividades():
-    data = sheet.get_all_records()
-    if not data:
-        return pd.DataFrame(columns=['id', 'tipo', 'titulo', 'ramo', 'fecha', 'hora', 'prioridad', 'estado', 'color'])
-    return pd.DataFrame(data)
+# 2. Cargar Datos
+st.title("🎓 Dashboard Personal - Alfonso José")
 
-def cambiar_estado_tarea(id_tarea, estado_actual):
-    nuevo_estado = "completada" if estado_actual == "pendiente" else "pendiente"
-    cell = sheet.find(str(id_tarea))
-    if cell:
-        # La columna 'estado' es la H (columna 8)
-        sheet.update_cell(cell.row, 8, nuevo_estado)
+df_actividades = pd.DataFrame(sheet_actividades.get_all_records())
+df_etiquetas = pd.DataFrame(sheet_etiquetas.get_all_records())
+df_horario = pd.DataFrame(sheet_horario.get_all_records())
 
-df_actividades = cargar_actividades()
+# Métricas rápidas
+col1, col2, col3 = st.columns(3)
+with col1:
+    st.metric("Total Actividades", len(df_actividades) if not df_actividades.empty else 0)
+with col2:
+    st.metric("Ramos / Proyectos", len(df_etiquetas) if not df_etiquetas.empty else 0)
+with col3:
+    st.metric("Clases en Horario", len(df_horario) if not df_horario.empty else 0)
 
-# --- VISTA PRINCIPAL ---
-col_izq, col_der = st.columns(2)
+st.divider()
 
-with col_izq:
-    st.header("📅 Próximos Eventos & Certámenes")
-    if df_actividades.empty:
-        st.write("No hay eventos en la nube.")
+# Sección de Actividades y Etiquetas
+col_left, col_right = st.columns([2, 1])
+
+with col_left:
+    st.subheader("📌 Tareas y Eventos")
+    if not df_actividades.empty:
+        st.dataframe(df_actividades, use_container_width=True)
     else:
-        eventos = df_actividades[(df_actividades['tipo'] == 'evento') & (df_actividades['estado'] == 'pendiente')]
-        if eventos.empty:
-            st.write("No hay eventos pendientes.")
-        else:
-            for _, row in eventos.iterrows():
-                hora_txt = f"a las {row['hora']}" if row['hora'] else "Todo el día"
-                ramo = row['ramo'] if row['ramo'] else "Personal"
-                color = row['color'] if row['color'] else "#4A90E2"
-                
-                st.markdown(f"""
-                <div style="border-left: 5px solid {color}; padding-left: 10px; margin-bottom: 10px;">
-                    <b>{row['titulo']}</b><br>
-                    🗓️ {row['fecha']} | {hora_txt}<br>
-                    <span style="background-color: {color}; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.8em;">{ramo}</span>
-                </div>
-                """, unsafe_allow_html=True)
-                st.divider()
+        st.info("No hay actividades registradas aún.")
 
-with col_der:
-    st.header("✅ To-Do List & Tareas")
-    if df_actividades.empty:
-        st.write("¡Todo al día! 🎉")
+with col_right:
+    st.subheader("🏷️ Etiquetas y Colores")
+    if not df_etiquetas.empty:
+        st.dataframe(df_etiquetas, use_container_width=True)
     else:
-        tareas = df_actividades[df_actividades['tipo'] == 'tarea']
-        if tareas.empty:
-            st.write("No hay tareas registradas.")
-        else:
-            for _, row in tareas.iterrows():
-                completada = True if str(row['estado']).strip().lower() == 'completada' else False
-                ramo = row['ramo'] if row['ramo'] else "Personal"
-                
-                marcado = st.checkbox(
-                    f"**{row['titulo']}** [{ramo}] — Vence: {row['fecha']}",
-                    value=completada,
-                    key=f"tarea_{row['id']}"
-                )
-                if marcado != completada:
-                    cambiar_estado_tarea(row['id'], row['estado'])
-                    st.rerun()
+        st.info("No hay etiquetas registradas.")
+
+st.divider()
+
+# Sección de Horario
+st.subheader("📅 Horario de Clases")
+if not df_horario.empty:
+    st.dataframe(df_horario, use_container_width=True)
+else:
+    st.info("La pestaña de Horario está lista para recibir tus ramos.")
