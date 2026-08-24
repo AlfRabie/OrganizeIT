@@ -66,7 +66,7 @@ def cargar_datos():
 
 df_actividades, df_horario = cargar_datos()
 
-# Header y Botón de Recarga en Layout Compacto
+# Header y Botón de Recarga
 col_title, col_sync = st.columns([0.7, 0.3])
 with col_title:
     st.markdown("# ⚡ Dashboard Alfonso José")
@@ -148,7 +148,6 @@ if not df_horario.empty:
         if df_mostrar.empty:
             st.success("🎉 ¡No tienes clases programadas para hoy!")
         else:
-            # Seleccionar y renombrar columnas con títulos muy breves para móvil
             df_mostrar_mvil = df_mostrar[["hora_inicio", "hora_termino", "ramo", "sala"]].copy()
             df_mostrar_mvil.columns = ["Inicio", "Fin", "Ramo", "Sala"]
             
@@ -170,7 +169,27 @@ if not df_horario.empty:
                     st.caption("*(Sin clases)*")
                 else:
                     for _, row in df_dia.iterrows():
-                        st.info(f"**{row['ramo']}**\n\n⏰ {row['hora_inicio']} - {row['hora_termino']}\n\n📍 {row.get('sala', 'Sin sala')}")
+                        color_ramo = row.get('color') if row.get('color') else '#4A90E2'
+                        sala_txt = row.get('sala') if row.get('sala') else 'Sin sala'
+                        
+                        # Cajas personalizadas con el color de cada ramo
+                        st.markdown(
+                            f"""
+                            <div style="
+                                background-color: {color_ramo};
+                                color: white;
+                                padding: 10px;
+                                border-radius: 8px;
+                                margin-bottom: 10px;
+                                font-size: 0.9rem;
+                            ">
+                                <strong>{row['ramo']}</strong><br>
+                                ⏰ {row['hora_inicio']} - {row['hora_termino']}<br>
+                                📍 {sala_txt}
+                            </div>
+                            """,
+                            unsafe_allow_html=True
+                        )
 else:
     st.info("No hay clases registradas en el horario.")
 
