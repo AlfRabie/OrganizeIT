@@ -1,3 +1,4 @@
+import os
 import json
 import gspread
 from google import genai
@@ -5,15 +6,22 @@ from google.oauth2.service_account import Credentials
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, filters, ContextTypes
 
-# 1. Credenciales
+# 1. Credenciales desde Variables de Entorno
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
-# 2. Configurar Google Sheets con las 3 pestañas
+# 2. Configurar Google Sheets (Nube vs Local)
 scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-creds = Credentials.from_service_account_file("credenciales.json", scopes=scopes)
-client = gspread.authorize(creds)
 
+if "GOOGLE_CREDENTIALS_JSON" in os.environ:
+    cred_info = json.loads(os.environ["GOOGLE_CREDENTIALS_JSON"])
+    creds = Credentials.from_service_account_info(cred_info, scopes=scopes)
+elif os.path.exists("credenciales.json"):
+    creds = Credentials.from_service_account_file("credenciales.json", scopes=scopes)
+else:
+    raise FileNotFoundError("No se encontraron credenciales en GOOGLE_CREDENTIALS_JSON ni en credenciales.json")
+
+client = gspread.authorize(creds)
 sh = client.open("Dashboard Alfonso Jose")
 sheet_actividades = sh.worksheet("Actividades")
 sheet_etiquetas = sh.worksheet("Etiquetas")
@@ -53,7 +61,6 @@ Estructura obligatoria (Formato JSON Array):
 """
 
 def gestionar_etiqueta_y_guardar(lista_datos):
-    # 1. Obtener etiquetas existentes en la pestaña 'Etiquetas'
     etiquetas_actuales = sheet_etiquetas.get_all_records()
     mapa_colores = {str(row.get('nombre', '')).strip().lower(): row.get('color') for row in etiquetas_actuales if row.get('nombre')}
     
@@ -65,16 +72,13 @@ def gestionar_etiqueta_y_guardar(lista_datos):
         ramo_key = ramo.strip().lower()
         color_ia = datos.get('color', '#4A90E2')
         
-        # Si el ramo/proyecto no está en la pestaña Etiquetas, lo agregamos automáticamente
         if ramo_key not in mapa_colores:
             tipo_etiqueta = "proyecto" if "proyecto" in ramo.lower() or color_ia == "#FF5A5F" else "ramo"
             sheet_etiquetas.append_row([ramo, tipo_etiqueta, color_ia])
             mapa_colores[ramo_key] = color_ia
         else:
-            # Si ya existe, usamos el color oficial registrado en la pestaña Etiquetas
             color_ia = mapa_colores[ramo_key]
 
-        # 2. Guardamos la actividad en la pestaña principal 'Actividades'
         fila = [
             str(nuevo_id),
             datos.get('tipo', 'tarea'),
@@ -89,17 +93,17 @@ def gestionar_etiqueta_y_guardar(lista_datos):
         sheet_actividades.append_row(fila)
         nuevo_id += 1
 
-# 4. Comandos y Lógica del Bot
+# 4. Lógica del Bot
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "¡Hola Alfonso José! 🎓 Bot sincronizado correctamente con tus 3 pestañas en la nube (Actividades, Etiquetas y Horario)."
+        "¡Hola Alfonso José! 🎓 Bot activo y sincronizado con Google Sheets."
     )
 
 async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mensaje_usuario = update.message.text
     print(f"Recibido de Alfonso José: {mensaje_usuario}")
     
-    mensaje_espera = await update.message.reply_text("⏳ Procesando y sincronizando con Google Sheets...")
+    mensaje_espera = await update.message.reply_text("⏳ Procesando y sincronizando...")
     
     try:
         prompt = f"{instrucciones}\n\nMensaje:\n{mensaje_usuario}"
@@ -113,7 +117,7 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         gestionar_etiqueta_y_guardar(lista_datos)
         
-        resumen = "✅ **¡Registrado y vinculado con éxito en la nube!**\n\n"
+        resumen = "✅ **¡Registrado con éxito en la nube!**\n\n"
         for item in lista_datos:
             tipo_icono = "📅 Evento" if item.get("tipo") == "evento" else "✅ Tarea"
             titulo_item = item.get('titulo', '')
@@ -126,7 +130,7 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await mensaje_espera.edit_text(f"❌ Error al procesar: {e}")
 
 if __name__ == '__main__':
-    print("Iniciando bot inteligente con soporte de 3 pestañas... Presiona Ctrl+C para detener.")
+    print("Iniciando bot...")
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), procesar_mensaje))
