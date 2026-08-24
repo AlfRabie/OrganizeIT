@@ -13,13 +13,14 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 # 2. Configurar Google Sheets (Nube vs Local)
 scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
 
+cred_info = None
 if "GOOGLE_CREDENTIALS_JSON" in os.environ:
     cred_info = json.loads(os.environ["GOOGLE_CREDENTIALS_JSON"])
-    creds = Credentials.from_service_account_info(cred_info, scopes=scopes)
 elif os.path.exists("credenciales.json"):
     creds = Credentials.from_service_account_file("credenciales.json", scopes=scopes)
-else:
-    raise FileNotFoundError("No se encontraron credenciales en GOOGLE_CREDENTIALS_JSON ni en credenciales.json")
+
+if cred_info:
+    creds = Credentials.from_service_account_info(cred_info, scopes=scopes)
 
 client = gspread.authorize(creds)
 sh = client.open("Dashboard Alfonso Jose")
@@ -32,28 +33,33 @@ client_ai = genai.Client(api_key=GEMINI_API_KEY)
 
 instrucciones = """
 Eres el asistente personal inteligente de Alfonso José. Tu trabajo es analizar mensajes y extraer 
-información de tareas, eventos o clases para su dashboard personal. 
+información de tareas, eventos o bloques de horario de clases para su dashboard personal. 
 Hoy es Lunes 24 de Agosto de 2026. Calcula las fechas exactas en base a hoy.
-IMPORTANTE: Si Alfonso José menciona un evento de alta importancia como un "certamen", "examen" o "prueba", 
-debes generar DOS elementos: 
+
+CLASIFICACIÓN DE TIPO:
+- Si el mensaje describe clases semanales o el horario completo de asignaturas/ramos, usa el tipo "horario".
+- Si es una prueba, certamen, reunión o fecha importante puntual, usa "evento".
+- Si es una tarea, entregable o pendiente, usa "tarea".
+
+REGLA PARA CERTÁMENES/PRUEBAS:
+Si menciona un evento de alta importancia como "certamen" o "examen", genera DOS elementos:
 1. El evento principal del certamen.
-2. Una tarea en el To-Do List para "Estudiar para el certamen [Nombre]" unos días antes.
+2. Una tarea en el To-Do List para "Estudiar para [Nombre]" unos días antes.
 
-Además, debes asignar un color en formato hexadecimal (#HEX) representativo para cada actividad:
-- Si es un ramo oficial, asigna un color armónico (ej: Azul #4A90E2, Morado #BD10E0, Verde #7ED321, Naranja #F5A623, Turquesa #50E3C2).
-- Si es un proyecto personal o emprendimiento, asigna un color destacado (ej: Rojo coral #FF5A5F).
-- Si es algo personal general, usa un gris (#9B9B9B).
+COLORES (#HEX):
+Asigna un color armónico por ramo (ej: Azul #4A90E2, Morado #BD10E0, Verde #7ED321, Naranja #F5A623, Turquesa #50E3C2, Coral #FF5A5F).
 
-Siempre debes responder ÚNICAMENTE con un objeto JSON válido que sea una LISTA de objetos, sin texto adicional.
-
-Estructura obligatoria (Formato JSON Array):
+Responde ÚNICAMENTE con un JSON válido (Lista de objetos):
 [
   {
-    "tipo": "evento" (o "tarea" o "nota"),
-    "titulo": "Título descriptivo",
-    "ramo": "Nombre del ramo o proyecto o null",
-    "fecha": "YYYY-MM-DD",
-    "hora": "HH:MM o null",
+    "tipo": "horario" (o "evento" o "tarea"),
+    "titulo": "Nombre de la materia / actividad",
+    "ramo": "Nombre del ramo o proyecto",
+    "dia": "Lunes" (solo si es tipo "horario"),
+    "fecha": "YYYY-MM-DD" (solo si es "evento" o "tarea"),
+    "hora_inicio": "HH:MM" (solo si es "horario"),
+    "hora_fin": "HH:MM" (solo si es "horario"),
+    "hora": "HH:MM" (para evento/tarea o null),
     "prioridad": "alta", "media" o "baja",
     "color": "#HEX"
   }
@@ -65,13 +71,17 @@ def gestionar_etiqueta_y_guardar(lista_datos):
     mapa_colores = {str(row.get('nombre', '')).strip().lower(): row.get('color') for row in etiquetas_actuales if row.get('nombre')}
     
     registros_actividades = sheet_actividades.get_all_records()
-    nuevo_id = len(registros_actividades) + 1
+    nuevo_id_act = len(registros_actividades) + 1
+
+    registros_horario = sheet_horario.get_all_records()
+    nuevo_id_hor = len(registros_horario) + 1
     
     for datos in lista_datos:
-        ramo = datos.get('ramo') or 'Personal'
+        ramo = datos.get('ramo') or datos.get('titulo') or 'Personal'
         ramo_key = ramo.strip().lower()
         color_ia = datos.get('color', '#4A90E2')
         
+        # Guardar / Verificar Etiqueta
         if ramo_key not in mapa_colores:
             tipo_etiqueta = "proyecto" if "proyecto" in ramo.lower() or color_ia == "#FF5A5F" else "ramo"
             sheet_etiquetas.append_row([ramo, tipo_etiqueta, color_ia])
@@ -79,31 +89,49 @@ def gestionar_etiqueta_y_guardar(lista_datos):
         else:
             color_ia = mapa_colores[ramo_key]
 
-        fila = [
-            str(nuevo_id),
-            datos.get('tipo', 'tarea'),
-            datos.get('titulo', ''),
-            ramo,
-            datos.get('fecha', ''),
-            datos.get('hora') or '',
-            datos.get('prioridad', 'media'),
-            'pendiente',
-            color_ia
-        ]
-        sheet_actividades.append_row(fila)
-        nuevo_id += 1
+        tipo_item = datos.get('tipo', 'tarea')
+
+        # Si es un bloque de HORARIO semanal
+        if tipo_item == 'horario':
+            fila_horario = [
+                str(nuevo_id_hor),
+                datos.get('ramo') or datos.get('titulo', ''),
+                datos.get('dia', ''),
+                datos.get('hora_inicio', ''),
+                datos.get('hora_fin', ''),
+                datos.get('sala', '') or '',
+                color_ia
+            ]
+            sheet_horario.append_row(fila_horario)
+            nuevo_id_hor += 1
+
+        # Si es EVENTO o TAREA puntual
+        else:
+            fila_actividad = [
+                str(nuevo_id_act),
+                tipo_item,
+                datos.get('titulo', ''),
+                ramo,
+                datos.get('fecha', ''),
+                datos.get('hora') or '',
+                datos.get('prioridad', 'media'),
+                'pendiente',
+                color_ia
+            ]
+            sheet_actividades.append_row(fila_actividad)
+            nuevo_id_act += 1
 
 # 4. Lógica del Bot
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "¡Hola Alfonso José! 🎓 Bot activo y sincronizado con Google Sheets."
+        "¡Hola Alfonso José! 🎓 Bot activo y listo para sincronizar tus actividades y horario."
     )
 
 async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mensaje_usuario = update.message.text
     print(f"Recibido de Alfonso José: {mensaje_usuario}")
     
-    mensaje_espera = await update.message.reply_text("⏳ Procesando y sincronizando...")
+    mensaje_espera = await update.message.reply_text("⏳ Procesando y clasificando información...")
     
     try:
         prompt = f"{instrucciones}\n\nMensaje:\n{mensaje_usuario}"
@@ -117,12 +145,19 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         gestionar_etiqueta_y_guardar(lista_datos)
         
-        resumen = "✅ **¡Registrado con éxito en la nube!**\n\n"
+        resumen = "✅ **¡Sincronizado con éxito en tu Sheet!**\n\n"
         for item in lista_datos:
-            tipo_icono = "📅 Evento" if item.get("tipo") == "evento" else "✅ Tarea"
+            tipo_item = item.get("tipo")
+            if tipo_item == "horario":
+                icono = "📅 Clase de Horario"
+            elif tipo_item == "evento":
+                icono = "📌 Evento Puntual"
+            else:
+                icono = "✅ Tarea"
+            
             titulo_item = item.get('titulo', '')
             ramo_item = item.get('ramo', 'Personal')
-            resumen += f"• {tipo_icono}: **{titulo_item}** ({ramo_item})\n"
+            resumen += f"• {icono}: **{titulo_item}** ({ramo_item})\n"
             
         await mensaje_espera.edit_text(resumen, parse_mode='Markdown')
         
