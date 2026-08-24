@@ -9,6 +9,23 @@ from google.oauth2.service_account import Credentials
 # Configuración de página
 st.set_page_config(page_title="Dashboard Personal - Alfonso José", page_icon="⚡", layout="wide")
 
+# CSS personalizado para hacer la cabecera compacta en móviles
+st.markdown("""
+    <style>
+    .block-container {
+        padding-top: 2rem !important;
+        padding-bottom: 2rem !important;
+    }
+    h1 {
+        font-size: 1.8rem !important;
+        margin-bottom: 0.5rem !important;
+    }
+    div[data-testid="stMetricValue"] {
+        font-size: 1.4rem !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
 scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
 
 @st.cache_resource
@@ -49,13 +66,12 @@ def cargar_datos():
 
 df_actividades, df_horario = cargar_datos()
 
-# Header y Botón de Recarga
-col_title, col_sync = st.columns([0.8, 0.2])
+# Header y Botón de Recarga en Layout Compacto
+col_title, col_sync = st.columns([0.7, 0.3])
 with col_title:
-    st.title("⚡ Dashboard Personal - Alfonso José")
+    st.markdown("# ⚡ Dashboard Alfonso José")
 with col_sync:
-    st.write("")
-    if st.button("🔄 Sincronizar datos", use_container_width=True):
+    if st.button("🔄 Sincronizar", use_container_width=True):
         st.cache_resource.clear()
         st.rerun()
 
@@ -104,17 +120,17 @@ if not df_actividades.empty:
         elif dias_faltantes == 1:
             cuenta_regresiva = "Mañana"
         else:
-            cuenta_regresiva = f"En {dias_faltantes} días"
+            cuenta_regresiva = f"En {dias_faltantes}d"
         proximo_certamen_str = f"{prox_evt['titulo']} ({cuenta_regresiva})"
 
 with col_kpi1:
-    st.metric("📅 Clases de Hoy", f"{clases_hoy_count} asignaturas")
+    st.metric("📅 Clases Hoy", f"{clases_hoy_count}")
 
 with col_kpi2:
-    st.metric("⏳ Pendientes esta Semana", f"{pendientes_semana_count} entregas")
+    st.metric("⏳ Pendientes Semana", f"{pendientes_semana_count}")
 
 with col_kpi3:
-    st.metric("🎯 Próximo Certamen / Evento", proximo_certamen_str)
+    st.metric("🎯 Próximo Evento", proximo_certamen_str)
 
 st.divider()
 
@@ -123,17 +139,21 @@ st.divider()
 # ==========================================
 st.subheader("📅 Horario de Clases")
 
-ver_toda_semana = st.toggle("Ver toda la semana (Agenda en 5 columnas)", value=False)
+ver_toda_semana = st.toggle("Ver toda la semana (Agenda 5 días)", value=False)
 
 if not df_horario.empty:
     if not ver_toda_semana:
-        st.caption(f"Mostrando clases de hoy (**{hoy_nombre}**):")
-        df_mostrar = df_horario[df_horario["dia"].astype(str).str.capitalize() == hoy_nombre]
+        st.caption(f"Clases de hoy (**{hoy_nombre}**):")
+        df_mostrar = df_horario[df_horario["dia"].astype(str).str.capitalize() == hoy_nombre].copy()
         if df_mostrar.empty:
             st.success("🎉 ¡No tienes clases programadas para hoy!")
         else:
+            # Seleccionar y renombrar columnas con títulos muy breves para móvil
+            df_mostrar_mvil = df_mostrar[["hora_inicio", "hora_termino", "ramo", "sala"]].copy()
+            df_mostrar_mvil.columns = ["Inicio", "Fin", "Ramo", "Sala"]
+            
             st.dataframe(
-                df_mostrar[["hora_inicio", "hora_termino", "ramo", "sala"]],
+                df_mostrar_mvil,
                 use_container_width=True,
                 hide_index=True
             )
@@ -167,10 +187,10 @@ if not df_actividades.empty:
     
     ramos_unicos = ["Todos"] + list(df_actividades["ramo"].dropna().unique())
     with col_f1:
-        filtro_ramo = st.selectbox("Filtrar por Ramo o Proyecto:", ramos_unicos)
+        filtro_ramo = st.selectbox("Filtrar por Ramo/Proyecto:", ramos_unicos)
     
     with col_f2:
-        ver_completadas = st.toggle("Ver historial completo (incluyendo completadas)", value=False)
+        ver_completadas = st.toggle("Ver historial completo", value=False)
 
     # Filtrado
     df_filtrado = df_actividades.copy()
@@ -182,16 +202,16 @@ if not df_actividades.empty:
         df_filtrado = df_filtrado[df_filtrado["estado"].astype(str).str.lower() != "completado"]
 
     # Mapeo de Emojis de Prioridad
-    mapa_prioridades = {"alta": "🔴 Alta", "media": "🟡 Media", "baja": "🟢 Baja"}
-    df_filtrado["prioridad_emoji"] = df_filtrado["prioridad"].astype(str).str.lower().map(mapa_prioridades).fillna("🟡 Media")
+    mapa_prioridades = {"alta": "🔴", "media": "🟡", "baja": "🟢"}
+    df_filtrado["prioridad_emoji"] = df_filtrado["prioridad"].astype(str).str.lower().map(mapa_prioridades).fillna("🟡")
     
     # Checkbox de estado completado
     df_filtrado["Completado"] = df_filtrado["estado"].astype(str).str.lower() == "completado"
 
-    # Seleccionar columnas a mostrar
+    # Seleccionar columnas a mostrar con nombres ultracortos
     cols_mostrar = ["Completado", "titulo", "ramo", "fecha", "prioridad_emoji"]
     df_mostrar_todo = df_filtrado[cols_mostrar].copy()
-    df_mostrar_todo.columns = ["Completado", "Tarea / Evento", "Ramo o Proyecto", "Fecha", "Prioridad"]
+    df_mostrar_todo.columns = ["✔", "Tarea", "Ramo", "Fecha", "Prio"]
 
     # Ordenar por fecha
     df_mostrar_todo = df_mostrar_todo.sort_values("Fecha")
@@ -201,13 +221,13 @@ if not df_actividades.empty:
         df_mostrar_todo,
         use_container_width=True,
         hide_index=True,
-        disabled=["Tarea / Evento", "Ramo o Proyecto", "Fecha", "Prioridad"]
+        disabled=["Tarea", "Ramo", "Fecha", "Prio"]
     )
 
     # Detectar cambios en checkboxes para guardar en Sheets
     for idx, row in edited_df.iterrows():
-        if row["Completado"] != df_filtrado.loc[idx, "Completado"]:
-            nuevo_estado = "completado" if row["Completado"] else "pendiente"
+        if row["✔"] != df_filtrado.loc[idx, "Completado"]:
+            nuevo_estado = "completado" if row["✔"] else "pendiente"
             id_fila = df_filtrado.loc[idx, "id"]
             
             # Buscar fila en gspread y actualizar
@@ -215,7 +235,7 @@ if not df_actividades.empty:
             if cell:
                 # La columna 'estado' es la 8va (H)
                 sheet_actividades.update_cell(cell.row, 8, nuevo_estado)
-                st.toast(f"Actualizado: {row['Tarea / Evento']} -> {nuevo_estado}")
+                st.toast(f"Actualizado: {row['Tarea']} -> {nuevo_estado}")
                 st.cache_resource.clear()
                 st.rerun()
 
