@@ -75,6 +75,48 @@ def ejecutar_eliminar(accion_eliminar):
         return f"Se eliminaron {eliminados} registro(s) coincidentes."
     return f"No se encontraron registros coincidentes con '{criterio}'."
 
+def ejecutar_editar(accion_editar):
+    # accion_editar = {"hoja": "horario", "ramo_o_titulo": "...", "campo": "sala", "nuevo_valor": "204", "dia": "Lunes"}
+    hoja_nombre = str(accion_editar.get("hoja", "")).lower()
+    criterio = str(accion_editar.get("ramo_o_titulo", "")).lower().strip()
+    campo = str(accion_editar.get("campo", "")).lower().strip()
+    nuevo_valor = str(accion_editar.get("nuevo_valor", "")).strip()
+    dia = str(accion_editar.get("dia", "")).lower().strip()
+
+    target_sheet = sheet_horario if "horario" in hoja_nombre else sheet_actividades
+    filas = target_sheet.get_all_records()
+
+    # Mapeo de columnas según la hoja
+    # Horario: id(1), dia(2), hora_inicio(3), hora_termino(4), ramo(5), sala(6), color(7)
+    # Actividades: id(1), tipo(2), titulo(3), ramo(4), fecha(5), hora(6), prioridad(7), estado(8), color(9)
+    col_map_horario = {"dia": 2, "hora_inicio": 3, "hora_termino": 4, "ramo": 5, "sala": 6}
+    col_map_act = {"tipo": 2, "titulo": 3, "ramo": 4, "fecha": 5, "hora": 6, "prioridad": 7, "estado": 8}
+
+    col_idx = None
+    if target_sheet == sheet_horario:
+        col_idx = col_map_horario.get(campo)
+    else:
+        col_idx = col_map_act.get(campo)
+
+    if not col_idx:
+        return f"No se reconoce el campo '{campo}' para actualizar."
+
+    modificados = 0
+    for idx, row in enumerate(filas):
+        row_str = " ".join([str(val).lower() for val in row.values()])
+        # Si coincide el ramo/título y opcionalmente el día
+        coincide_criterio = criterio in row_str
+        coincide_dia = (not dia) or (dia in str(row.get("dia", "")).lower())
+
+        if coincide_criterio and coincide_dia:
+            # Fila en Sheets es idx + 2 por encabezados
+            target_sheet.update_cell(idx + 2, col_idx, nuevo_valor)
+            modificados += 1
+
+    if modificados > 0:
+        return f"Se actualizó el campo '{campo}' a '{nuevo_valor}' en {modificados} registro(s)."
+    return f"No se encontró el registro para actualizar."
+
 def ejecutar_guardar(lista_datos):
     etiquetas_actuales = sheet_etiquetas.get_all_records()
     mapa_colores = {str(row.get('nombre', '')).strip().lower(): row.get('color') for row in etiquetas_actuales if row.get('nombre')}
@@ -128,7 +170,7 @@ def ejecutar_guardar(lista_datos):
 
 # 4. Handlers de Telegram
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("¡Hola Alfonso José! ⚡ Bot activo con modo de confirmación previa.")
+    await update.message.reply_text("¡Hola Alfonso José! ⚡ Bot activo con funciones de agregar, editar y eliminar.")
 
 async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mensaje_usuario = update.message.text
@@ -147,14 +189,25 @@ REGLAS DE ASOCIACIÓN:
 2. Determina si los nuevos elementos son "ramo" o "proyecto".
 
 FORMATOS JSON DE RESPUESTA:
-- Si pide BORRAR / ELIMINAR / QUITAR:
+
+1. Si pide MODIFICAR, CAMBIAR, AGREGAR SALA o EDITAR una entrada existente:
+{{
+  "accion": "editar",
+  "hoja": "horario" (o "actividades"),
+  "ramo_o_titulo": "Nombre exacto del ramo o tarea",
+  "dia": "Lunes" (solo si aplica),
+  "campo": "sala" (o "hora_inicio", "hora_termino", "fecha", "prioridad", "estado"),
+  "nuevo_valor": "Valor a asignar (ej: Sala 204)"
+}}
+
+2. Si pide BORRAR / ELIMINAR / QUITAR:
 {{
   "accion": "eliminar",
   "hoja": "horario" (o "actividades" o "etiquetas"),
   "criterio": "texto a eliminar"
 }}
 
-- Si pide AGREGAR / GUARDAR / CREAR:
+3. Si pide AGREGAR / GUARDAR / CREAR algo nuevo:
 [
   {{
     "accion": "agregar",
@@ -182,14 +235,22 @@ FORMATOS JSON DE RESPUESTA:
         texto_limpio = respuesta.text.replace('```json', '').replace('```', '').strip()
         parsed_data = json.loads(texto_limpio)
         
-        # Guardar en memoria temporal del contexto de usuario
         context.user_data['pending_action'] = parsed_data
         
-        # Construir mensaje de pre-visualización
+        # Construir pre-visualización según la acción
         if isinstance(parsed_data, dict) and parsed_data.get("accion") == "eliminar":
             preview = f"🗑️ **¿Confirmas ELIMINAR este registro?**\n\n"
-            preview += f"• **Pestaña:** {parsed_data.get('hoja')}\n"
+            preview += f"• **Hoja:** {parsed_data.get('hoja')}\n"
             preview += f"• **Criterio:** {parsed_data.get('criterio')}"
+
+        elif isinstance(parsed_data, dict) and parsed_data.get("accion") == "editar":
+            preview = f"✏️ **¿Confirmas MODIFICAR este registro?**\n\n"
+            preview += f"• **Ramo/Título:** {parsed_data.get('ramo_o_titulo')}\n"
+            if parsed_data.get('dia'):
+                preview += f"• **Día:** {parsed_data.get('dia')}\n"
+            preview += f"• **Campo a cambiar:** `{parsed_data.get('campo')}`\n"
+            preview += f"• **Nuevo valor:** {parsed_data.get('nuevo_valor')}"
+
         else:
             lista_datos = parsed_data if isinstance(parsed_data, list) else [parsed_data]
             preview = f"📝 **¿Confirmas GUARDAR lo siguiente?**\n\n"
@@ -200,7 +261,6 @@ FORMATOS JSON DE RESPUESTA:
                 titulo = item.get('titulo', '')
                 preview += f"• **{tipo.upper()}**: {titulo} ({cat}: {ramo})\n"
 
-        # Crear botones interactivos
         keyboard = [
             [
                 InlineKeyboardButton("✅ Sí, aplicar", callback_data="confirmar_si"),
@@ -220,7 +280,7 @@ async def procesar_confirmacion(update: Update, context: ContextTypes.DEFAULT_TY
 
     if query.data == "confirmar_no":
         context.user_data.pop('pending_action', None)
-        await query.edit_message_text("❌ **Acción cancelada.** No se realizaron cambios en Google Sheets.")
+        await query.edit_message_text("❌ **Acción cancelada.** No se realizaron cambios.")
         return
 
     pending_action = context.user_data.get('pending_action')
@@ -229,11 +289,14 @@ async def procesar_confirmacion(update: Update, context: ContextTypes.DEFAULT_TY
         return
 
     try:
-        # Caso 1: Eliminar
         if isinstance(pending_action, dict) and pending_action.get("accion") == "eliminar":
             res = ejecutar_eliminar(pending_action)
             await query.edit_message_text(f"✅ **¡Completado!** {res}")
-        # Caso 2: Agregar
+
+        elif isinstance(pending_action, dict) and pending_action.get("accion") == "editar":
+            res = ejecutar_editar(pending_action)
+            await query.edit_message_text(f"✅ **¡Actualizado!** {res}")
+
         else:
             lista_datos = pending_action if isinstance(pending_action, list) else [pending_action]
             ejecutar_guardar(lista_datos)
