@@ -12,26 +12,27 @@ scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapi
 
 @st.cache_resource
 def conectar_sheets():
-    # 1. Intentar desde st.secrets (Streamlit Cloud)
-    if "GOOGLE_CREDENTIALS_JSON" in st.secrets:
-        cred_data = st.secrets["GOOGLE_CREDENTIALS_JSON"]
-        if isinstance(cred_data, str):
-            cred_info = json.loads(cred_data)
-        else:
-            cred_info = dict(cred_data)
-        creds = Credentials.from_service_account_info(cred_info, scopes=scopes)
+    cred_info = None
+    # 1. Intentar leer de st.secrets de forma segura
+    try:
+        if "GOOGLE_CREDENTIALS_JSON" in st.secrets:
+            cred_data = st.secrets["GOOGLE_CREDENTIALS_JSON"]
+            cred_info = json.loads(cred_data) if isinstance(cred_data, str) else dict(cred_data)
+    except Exception:
+        pass  # Si st.secrets no existe o falla, continuamos
 
-    # 2. Intentar desde variable de entorno
-    elif "GOOGLE_CREDENTIALS_JSON" in os.environ:
+    # 2. Si no estaba en st.secrets, buscar en Variables de Entorno (Railway/Render/System)
+    if cred_info is None and "GOOGLE_CREDENTIALS_JSON" in os.environ:
         cred_info = json.loads(os.environ["GOOGLE_CREDENTIALS_JSON"])
-        creds = Credentials.from_service_account_info(cred_info, scopes=scopes)
 
-    # 3. Intentar archivo local (solo si existe)
+    # Generar credenciales desde el JSON obtenido en memoria
+    if cred_info:
+        creds = Credentials.from_service_account_info(cred_info, scopes=scopes)
+    # 3. Respaldo local si existe el archivo credenciales.json
     elif os.path.exists("credenciales.json"):
         creds = Credentials.from_service_account_file("credenciales.json", scopes=scopes)
-
     else:
-        st.error("❌ No se encontraron credenciales. Agrega GOOGLE_CREDENTIALS_JSON en st.secrets.")
+        st.error("❌ No se encontraron credenciales. Configura GOOGLE_CREDENTIALS_JSON en Secrets o Variables de Entorno.")
         st.stop()
 
     client = gspread.authorize(creds)
