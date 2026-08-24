@@ -28,7 +28,10 @@ sheet_actividades = sh.worksheet("Actividades")
 sheet_etiquetas = sh.worksheet("Etiquetas")
 sheet_horario = sh.worksheet("Horario")
 
-# 3. Configurar la IA
+# 3. Configurar la IA de forma explícita
+if not GEMINI_API_KEY:
+    raise ValueError("Falta configurar la variable de entorno GEMINI_API_KEY")
+
 client_ai = genai.Client(api_key=GEMINI_API_KEY)
 
 instrucciones = """
@@ -55,11 +58,12 @@ Responde ÚNICAMENTE con un JSON válido (Lista de objetos):
     "tipo": "horario" (o "evento" o "tarea"),
     "titulo": "Nombre de la materia / actividad",
     "ramo": "Nombre del ramo o proyecto",
-    "dia": "Lunes" (solo si es tipo "horario"),
+    "dia": "Lunes" (solo si es tipo "horario": Lunes, Martes, Miércoles, Jueves, Viernes),
     "fecha": "YYYY-MM-DD" (solo si es "evento" o "tarea"),
     "hora_inicio": "HH:MM" (solo si es "horario"),
-    "hora_fin": "HH:MM" (solo si es "horario"),
+    "hora_termino": "HH:MM" (solo si es "horario"),
     "hora": "HH:MM" (para evento/tarea o null),
+    "sala": "Nombre/Número de sala o string vacío",
     "prioridad": "alta", "media" o "baja",
     "color": "#HEX"
   }
@@ -92,14 +96,15 @@ def gestionar_etiqueta_y_guardar(lista_datos):
         tipo_item = datos.get('tipo', 'tarea')
 
         # Si es un bloque de HORARIO semanal
+        # Columnas exacta en Sheet: ID | dia | hora_inicio | hora_termino | ramo | sala | color
         if tipo_item == 'horario':
             fila_horario = [
                 str(nuevo_id_hor),
-                datos.get('ramo') or datos.get('titulo', ''),
                 datos.get('dia', ''),
                 datos.get('hora_inicio', ''),
-                datos.get('hora_fin', ''),
-                datos.get('sala', '') or '',
+                datos.get('hora_termino', ''),
+                ramo,
+                datos.get('sala', ''),
                 color_ia
             ]
             sheet_horario.append_row(fila_horario)
