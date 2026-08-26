@@ -9,7 +9,7 @@ from google.oauth2.service_account import Credentials
 # Configuración de página
 st.set_page_config(page_title="Dashboard Personal - Alfonso José", page_icon="⚡", layout="wide")
 
-# CSS personalizado para hacer la cabecera compacta en móviles
+# CSS personalizado para hacer la cabecera compacta en móviles y estilizar tarjetas KPI
 st.markdown("""
     <style>
     .block-container {
@@ -22,6 +22,21 @@ st.markdown("""
     }
     div[data-testid="stMetricValue"] {
         font-size: 1.4rem !important;
+    }
+    .custom-kpi-card {
+        background-color: transparent;
+        padding: 0;
+        margin-top: 0;
+    }
+    .custom-kpi-label {
+        font-size: 0.85rem;
+        color: rgba(250, 250, 250, 0.6);
+        margin-bottom: 0.2rem;
+    }
+    .custom-kpi-value {
+        font-size: 1.4rem;
+        font-weight: 700;
+        line-height: 1.2;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -93,7 +108,7 @@ if not df_horario.empty and "dia" in df_horario.columns:
 
 # 2. Pendientes esta semana
 pendientes_semana_count = 0
-proximo_certamen_str = "Ninguno agendado"
+proximo_certamen_html = "<span>Ninguno agendado</span>"
 
 if not df_actividades.empty:
     df_actividades['fecha_dt'] = pd.to_datetime(df_actividades['fecha'], errors='coerce').dt.date
@@ -121,7 +136,17 @@ if not df_actividades.empty:
             cuenta_regresiva = "Mañana"
         else:
             cuenta_regresiva = f"En {dias_faltantes}d"
-        proximo_certamen_str = f"{prox_evt['titulo']} ({cuenta_regresiva})"
+            
+        ramo_nombre = str(prox_evt.get('ramo', 'General')).strip()
+        color_ramo = str(prox_evt.get('color', '#4A90E2')).strip()
+        if not color_ramo or color_ramo.lower() == 'nan':
+            color_ramo = '#4A90E2'
+
+        # Formato con título, cuenta regresiva y ramo entre corchetes con su color propio
+        proximo_certamen_html = f"""
+            <span>{prox_evt['titulo']} ({cuenta_regresiva})</span> 
+            <span style="color: {color_ramo}; font-weight: bold; background-color: rgba(255,255,255,0.08); padding: 2px 6px; border-radius: 4px; font-size: 0.95rem;">[{ramo_nombre}]</span>
+        """
 
 with col_kpi1:
     st.metric("📅 Clases Hoy", f"{clases_hoy_count}")
@@ -130,7 +155,15 @@ with col_kpi2:
     st.metric("⏳ Pendientes Semana", f"{pendientes_semana_count}")
 
 with col_kpi3:
-    st.metric("🎯 Próximo Evento", proximo_certamen_str)
+    st.markdown(
+        f"""
+        <div class="custom-kpi-card">
+            <div class="custom-kpi-label">🎯 Próximo Evento</div>
+            <div class="custom-kpi-value">{proximo_certamen_html}</div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 
 st.divider()
 
