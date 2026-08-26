@@ -5,6 +5,7 @@ import pandas as pd
 import streamlit as st
 import gspread
 from datetime import datetime, date, timedelta, time
+from zoneinfo import ZoneInfo
 from google.oauth2.service_account import Credentials
 
 # Configuración de página
@@ -137,9 +138,10 @@ with col_sync:
         st.cache_resource.clear()
         st.rerun()
 
-# Días en español y contexto temporal
+# Días en español y contexto temporal ajustado a Chile (America/Santiago)
 dias_semana = {0: "Lunes", 1: "Martes", 2: "Miércoles", 3: "Jueves", 4: "Viernes", 5: "Sábado", 6: "Domingo"}
-hoy_dt = datetime.now()
+tz_chile = ZoneInfo("America/Santiago")
+hoy_dt = datetime.now(tz_chile)
 hoy_nombre = dias_semana[hoy_dt.weekday()]
 hoy_fecha = hoy_dt.date()
 hora_actual = hoy_dt.time()
