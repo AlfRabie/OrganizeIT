@@ -242,7 +242,7 @@ FORMATOS JSON DE RESPUESTA:
 """
         prompt = f"{instrucciones}\n\nMensaje:\n{mensaje_usuario}"
         respuesta = client_ai.models.generate_content(
-            model='gemini-2.5-flash-lite',
+            model='gemini-3.5-flash-lite',
             contents=prompt,
         )
         
