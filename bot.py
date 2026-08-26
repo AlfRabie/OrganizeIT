@@ -2,6 +2,7 @@ import os
 import json
 import gspread
 from google import genai
+from datetime import datetime
 from google.oauth2.service_account import Credentials
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -179,8 +180,21 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         etiquetas_existentes = obtener_contexto_etiquetas()
         
+        # 1. Obtener fecha y día actual dinámicamente
+        dias_espanol = {0: "Lunes", 1: "Martes", 2: "Miércoles", 3: "Jueves", 4: "Viernes", 5: "Sábado", 6: "Domingo"}
+        ahora = datetime.now()
+        dia_semana_actual = dias_espanol[ahora.weekday()]
+        fecha_actual_str = ahora.strftime("%Y-%m-%d")
+        año_actual = ahora.year
+
+        # 2. Inyectar la fecha actual en las instrucciones
         instrucciones = f"""
 Eres el asistente personal inteligente de Alfonso José.
+INFORMACIÓN TEMPORAL OBLIGATORIA:
+- Hoy es: {dia_semana_actual}, {fecha_actual_str} (Año actual: {año_actual}).
+- Todas las fechas relativas como "este viernes", "el próximo mes" o "mañana" DEBEN calcularse partiendo de hoy ({fecha_actual_str}).
+- El formato de fecha DEBE ser estrictamente YYYY-MM-DD.
+
 LISTA DE RAMOS/PROYECTOS EXISTENTES:
 {json.dumps(etiquetas_existentes, ensure_ascii=False)}
 
@@ -197,7 +211,7 @@ FORMATOS JSON DE RESPUESTA:
   "ramo_o_titulo": "Nombre exacto del ramo o tarea",
   "dia": "Lunes" (solo si aplica),
   "campo": "sala" (o "hora_inicio", "hora_termino", "fecha", "prioridad", "estado"),
-  "nuevo_valor": "Valor a asignar (ej: Sala 204)"
+  "nuevo_valor": "Valor a asignar"
 }}
 
 2. Si pide BORRAR / ELIMINAR / QUITAR:
@@ -216,7 +230,7 @@ FORMATOS JSON DE RESPUESTA:
     "titulo": "Nombre de la materia / actividad",
     "ramo": "Nombre exacto del ramo o proyecto",
     "dia": "Lunes" (solo para horario),
-    "fecha": "YYYY-MM-DD" (solo para evento/tarea),
+    "fecha": "YYYY-MM-DD" (solo para evento/tarea, calculada desde {fecha_actual_str}),
     "hora_inicio": "HH:MM",
     "hora_termino": "HH:MM",
     "hora": "HH:MM",
@@ -228,7 +242,7 @@ FORMATOS JSON DE RESPUESTA:
 """
         prompt = f"{instrucciones}\n\nMensaje:\n{mensaje_usuario}"
         respuesta = client_ai.models.generate_content(
-            model='gemini-3.6-flash',
+            model='gemini-2.0-flash-lite',
             contents=prompt,
         )
         
