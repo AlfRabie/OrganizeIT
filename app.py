@@ -250,7 +250,7 @@ if not df_actividades.empty:
     
     if total_semana_count > 0:
         ratio_progreso = completadas_semana_count / total_semana_count
-
+# Próximos certámenes / eventos (mostramos hasta 3)
     df_pendientes = df_actividades[df_actividades['estado'].astype(str).str.lower() != 'completado']
     df_eventos = df_pendientes[
         (df_pendientes['tipo'].astype(str).str.lower() == 'evento') & 
@@ -273,12 +273,13 @@ if not df_actividades.empty:
             if not color_ramo or color_ramo.lower() == 'nan':
                 color_ramo = '#4A90E2'
 
-            item_html = f"""
-            <div style="margin-bottom: 5px;">
-                <span>• {prox_evt['titulo']} ({cuenta_regresiva})</span> 
-                <span style="color: {color_ramo}; font-weight: bold; background-color: rgba(255,255,255,0.08); padding: 1px 5px; border-radius: 4px; font-size: 0.85rem;">[{ramo_nombre}]</span>
-            </div>
-            """
+            # Construcción compacta en una sola línea sin espacios iniciales
+            item_html = (
+                f'<div style="margin-bottom: 6px;">'
+                f'• <span>{prox_evt["titulo"]} ({cuenta_regresiva})</span> '
+                f'<span style="color: {color_ramo}; font-weight: bold; background-color: rgba(255,255,255,0.08); padding: 2px 6px; border-radius: 4px; font-size: 0.85rem;">[{ramo_nombre}]</span>'
+                f'</div>'
+            )
             filas_eventos.append(item_html)
             
         proximo_certamen_html = "".join(filas_eventos)
@@ -291,15 +292,9 @@ with col_kpi2:
 
 with col_kpi3:
     st.markdown(
-        f"""
-        <div class="custom-kpi-card">
-            <div class="custom-kpi-label">🎯 Próximos Eventos / Certámenes</div>
-            <div class="custom-kpi-value">{proximo_certamen_html}</div>
-        </div>
-        """,
+        f'<div class="custom-kpi-card"><div class="custom-kpi-label">🎯 Próximos Eventos / Certámenes</div><div class="custom-kpi-value">{proximo_certamen_html}</div></div>',
         unsafe_allow_html=True
     )
-
 # Barra de Progreso Semanal
 st.write("")
 if total_semana_count > 0:
