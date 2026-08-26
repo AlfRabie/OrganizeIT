@@ -39,15 +39,6 @@ st.markdown("""
         font-weight: 600;
         line-height: 1.4;
     }
-    .class-status-banner {
-        padding: 12px 16px;
-        border-radius: 10px;
-        margin-bottom: 15px;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        font-size: 0.95rem;
-    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -184,32 +175,25 @@ if not df_horario.empty and "dia" in df_horario.columns:
     if clase_en_curso is not None:
         color = clase_en_curso.get('color') or '#27AE60'
         sala = clase_en_curso.get('sala') or 'Sin sala'
-        st.markdown(
-            f"""
-            <div class="class-status-banner" style="background-color: {color}; color: white;">
-                <div>
-                    <strong>🔴 EN CLASE AHORA:</strong> {clase_en_curso['ramo']} (📍 {sala})
-                </div>
-                <div>⏰ Termina a las {clase_en_curso['hora_termino']}</div>
-            </div>
-            """,
-            unsafe_allow_html=True
+        banner_html = (
+            f'<div style="background-color: {color}; color: white; padding: 12px 16px; border-radius: 8px; margin-bottom: 15px; font-size: 0.95rem; line-height: 1.5;">'
+            f'<strong>🔴 EN CLASE AHORA:</strong> {clase_en_curso["ramo"]} (📍 {sala})<br>'
+            f'<span>⏰ Termina a las {clase_en_curso["hora_termino"]}</span>'
+            f'</div>'
         )
+        st.markdown(banner_html, unsafe_allow_html=True)
+
     elif proxima_clase is not None and minutos_para_proxima <= 180:
         color = proxima_clase.get('color') or '#2980B9'
         sala = proxima_clase.get('sala') or 'Sin sala'
-        tiempo_txt = f"En {minutos_para_proxima} min" if minutos_para_proxima > 0 else "¡Comenzando ahora!"
-        st.markdown(
-            f"""
-            <div class="class-status-banner" style="background-color: {color}; color: white;">
-                <div>
-                    <strong>⏳ PRÓXIMA CLASE:</strong> {proxima_clase['ramo']} (📍 {sala})
-                </div>
-                <div>⏰ {proxima_clase['hora_inicio']} ({tiempo_txt})</div>
-            </div>
-            """,
-            unsafe_allow_html=True
+        tiempo_txt = f"en {minutos_para_proxima} min" if minutos_para_proxima > 0 else "comenzando ahora"
+        banner_html = (
+            f'<div style="background-color: {color}; color: white; padding: 12px 16px; border-radius: 8px; margin-bottom: 15px; font-size: 0.95rem; line-height: 1.5;">'
+            f'<strong>⏳ PRÓXIMA CLASE:</strong> {proxima_clase["ramo"]} (📍 {sala})<br>'
+            f'<span>⏰ Inicia a las {proxima_clase["hora_inicio"]} ({tiempo_txt})</span>'
+            f'</div>'
         )
+        st.markdown(banner_html, unsafe_allow_html=True)
 
 # Modo Enfoque Toggle
 col_t1, col_t2 = st.columns([0.7, 0.3])
@@ -250,7 +234,8 @@ if not df_actividades.empty:
     
     if total_semana_count > 0:
         ratio_progreso = completadas_semana_count / total_semana_count
-# Próximos certámenes / eventos (mostramos hasta 3)
+
+    # Próximos certámenes / eventos (mostramos hasta 3)
     df_pendientes = df_actividades[df_actividades['estado'].astype(str).str.lower() != 'completado']
     df_eventos = df_pendientes[
         (df_pendientes['tipo'].astype(str).str.lower() == 'evento') & 
@@ -273,7 +258,6 @@ if not df_actividades.empty:
             if not color_ramo or color_ramo.lower() == 'nan':
                 color_ramo = '#4A90E2'
 
-            # Construcción compacta en una sola línea sin espacios iniciales
             item_html = (
                 f'<div style="margin-bottom: 6px;">'
                 f'• <span>{prox_evt["titulo"]} ({cuenta_regresiva})</span> '
@@ -295,6 +279,7 @@ with col_kpi3:
         f'<div class="custom-kpi-card"><div class="custom-kpi-label">🎯 Próximos Eventos / Certámenes</div><div class="custom-kpi-value">{proximo_certamen_html}</div></div>',
         unsafe_allow_html=True
     )
+
 # Barra de Progreso Semanal
 st.write("")
 if total_semana_count > 0:
@@ -377,7 +362,7 @@ st.subheader("✅ Pendientes & Eventos")
 if not df_actividades.empty:
     df_filtrado = df_actividades.copy()
     
-    # 3. FILTROS RÁPIDOS DE URGENCIA
+    # Filtros Rápidos de Urgencia
     if not modo_enfoque:
         col_f1, col_f2 = st.columns([0.55, 0.45])
         
@@ -417,7 +402,6 @@ if not df_actividades.empty:
             df_filtrado = df_filtrado[df_filtrado["estado"].astype(str).str.lower() != "completado"]
 
     else:
-        # En modo enfoque: solo actividades de hoy no completadas
         st.info("🎯 **Modo Enfoque activo:** Mostrando únicamente los pendientes para hoy.")
         df_filtrado = df_filtrado[
             (df_filtrado['fecha_dt'] == hoy_fecha) & 
