@@ -1,8 +1,8 @@
 import os
 import json
 import gspread
+from datetime import datetime, time
 from google import genai
-from datetime import datetime
 from google.oauth2.service_account import Credentials
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -46,6 +46,30 @@ def obtener_contexto_etiquetas():
     etiquetas = sheet_etiquetas.get_all_records()
     return [row.get('nombre') for row in etiquetas if row.get('nombre')]
 
+def verificar_tope_horario(fecha_str, hora_str):
+    if not fecha_str or not hora_str:
+        return None
+    try:
+        fecha_obj = datetime.strptime(fecha_str, "%Y-%m-%d").date()
+        dias_espanol = {0: "Lunes", 1: "Martes", 2: "Miércoles", 3: "Jueves", 4: "Viernes", 5: "Sábado", 6: "Domingo"}
+        dia_nombre = dias_espanol[fecha_obj.weekday()]
+
+        hora_evento = datetime.strptime(hora_str.strip(), "%H:%M").time()
+        clases = sheet_horario.get_all_records()
+
+        for c in clases:
+            if str(c.get("dia", "")).capitalize() == dia_nombre:
+                h_ini_str = str(c.get("hora_inicio", "")).strip()
+                h_fin_str = str(c.get("hora_termino", "")).strip()
+                if h_ini_str and h_fin_str:
+                    h_ini = datetime.strptime(h_ini_str, "%H:%M").time()
+                    h_fin = datetime.strptime(h_fin_str, "%H:%M").time()
+                    if h_ini <= hora_evento <= h_fin:
+                        return f"Choca con tu clase de **{c.get('ramo')}** ({h_ini_str} - {h_fin_str})"
+    except Exception:
+        pass
+    return None
+
 def ejecutar_eliminar(accion_eliminar):
     hoja_nombre = str(accion_eliminar.get("hoja", "")).lower()
     criterio = str(accion_eliminar.get("criterio", "")).lower().strip()
@@ -77,7 +101,6 @@ def ejecutar_eliminar(accion_eliminar):
     return f"No se encontraron registros coincidentes con '{criterio}'."
 
 def ejecutar_editar(accion_editar):
-    # accion_editar = {"hoja": "horario", "ramo_o_titulo": "...", "campo": "sala", "nuevo_valor": "204", "dia": "Lunes"}
     hoja_nombre = str(accion_editar.get("hoja", "")).lower()
     criterio = str(accion_editar.get("ramo_o_titulo", "")).lower().strip()
     campo = str(accion_editar.get("campo", "")).lower().strip()
@@ -87,17 +110,10 @@ def ejecutar_editar(accion_editar):
     target_sheet = sheet_horario if "horario" in hoja_nombre else sheet_actividades
     filas = target_sheet.get_all_records()
 
-    # Mapeo de columnas según la hoja
-    # Horario: id(1), dia(2), hora_inicio(3), hora_termino(4), ramo(5), sala(6), color(7)
-    # Actividades: id(1), tipo(2), titulo(3), ramo(4), fecha(5), hora(6), prioridad(7), estado(8), color(9)
     col_map_horario = {"dia": 2, "hora_inicio": 3, "hora_termino": 4, "ramo": 5, "sala": 6}
     col_map_act = {"tipo": 2, "titulo": 3, "ramo": 4, "fecha": 5, "hora": 6, "prioridad": 7, "estado": 8}
 
-    col_idx = None
-    if target_sheet == sheet_horario:
-        col_idx = col_map_horario.get(campo)
-    else:
-        col_idx = col_map_act.get(campo)
+    col_idx = col_map_horario.get(campo) if target_sheet == sheet_horario else col_map_act.get(campo)
 
     if not col_idx:
         return f"No se reconoce el campo '{campo}' para actualizar."
@@ -105,12 +121,10 @@ def ejecutar_editar(accion_editar):
     modificados = 0
     for idx, row in enumerate(filas):
         row_str = " ".join([str(val).lower() for val in row.values()])
-        # Si coincide el ramo/título y opcionalmente el día
         coincide_criterio = criterio in row_str
         coincide_dia = (not dia) or (dia in str(row.get("dia", "")).lower())
 
         if coincide_criterio and coincide_dia:
-            # Fila en Sheets es idx + 2 por encabezados
             target_sheet.update_cell(idx + 2, col_idx, nuevo_valor)
             modificados += 1
 
@@ -129,7 +143,7 @@ def ejecutar_guardar(lista_datos):
     nuevo_id_hor = len(registros_horario) + 1
     
     for datos in lista_datos:
-        ramo = datos.get('ramo') or datos.get('titulo') or 'Personal'
+        ramo = datos.get('ramo') or 'Personal'
         ramo_key = ramo.strip().lower()
         color_ia = datos.get('color', '#4A90E2')
         tipo_etiqueta = datos.get('categoria_etiqueta', 'ramo')
@@ -171,7 +185,7 @@ def ejecutar_guardar(lista_datos):
 
 # 4. Handlers de Telegram
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("¡Hola Alfonso José! ⚡ Bot activo con funciones de agregar, editar y eliminar.")
+    await update.message.reply_text("¡Hola Alfonso José! ⚡ Bot activo con detección de topes de horario.")
 
 async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mensaje_usuario = update.message.text
@@ -180,31 +194,29 @@ async def procesar_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         etiquetas_existentes = obtener_contexto_etiquetas()
         
-        # 1. Obtener fecha y día actual dinámicamente
         dias_espanol = {0: "Lunes", 1: "Martes", 2: "Miércoles", 3: "Jueves", 4: "Viernes", 5: "Sábado", 6: "Domingo"}
         ahora = datetime.now()
         dia_semana_actual = dias_espanol[ahora.weekday()]
         fecha_actual_str = ahora.strftime("%Y-%m-%d")
         año_actual = ahora.year
 
-        # 2. Inyectar la fecha actual en las instrucciones
         instrucciones = f"""
 Eres el asistente personal inteligente de Alfonso José.
-INFORMACIÓN TEMPORAL OBLIGATORIA:
-- Hoy es: {dia_semana_actual}, {fecha_actual_str} (Año actual: {año_actual}).
-- Todas las fechas relativas como "este viernes", "el próximo mes" o "mañana" DEBEN calcularse partiendo de hoy ({fecha_actual_str}).
-- El formato de fecha DEBE ser estrictamente YYYY-MM-DD.
+INFORMACIÓN TEMPORAL:
+- Hoy es: {dia_semana_actual}, {fecha_actual_str} (Año {año_actual}).
+- Fechas relativas ("este viernes", "mañana") deben calcularse partiendo de hoy ({fecha_actual_str}). Formato YYYY-MM-DD.
 
 LISTA DE RAMOS/PROYECTOS EXISTENTES:
 {json.dumps(etiquetas_existentes, ensure_ascii=False)}
 
-REGLAS DE ASOCIACIÓN:
-1. Si el usuario menciona un ramo/proyecto existente de forma corta, usa el NOMBRE EXACTO de la lista.
-2. Determina si los nuevos elementos son "ramo" o "proyecto".
+REGLAS DE FORMATO ESTRICTAS:
+1. "titulo": Describe únicamente la acción o entregable (ej: "Entrega de informe final", "Certamen 1", "Comprar insumos"). NUNCA repitas el nombre del ramo dentro del título.
+2. "ramo": Debe contener exclusivamente el nombre del ramo o proyecto (usa el exacto de la lista de EXISTENTES si coincide).
+3. "hora": Formato "HH:MM" (24h) si se especifica; si no, null.
 
 FORMATOS JSON DE RESPUESTA:
 
-1. Si pide MODIFICAR, CAMBIAR, AGREGAR SALA o EDITAR una entrada existente:
+1. MODIFICAR/EDITAR:
 {{
   "accion": "editar",
   "hoja": "horario" (o "actividades"),
@@ -214,27 +226,27 @@ FORMATOS JSON DE RESPUESTA:
   "nuevo_valor": "Valor a asignar"
 }}
 
-2. Si pide BORRAR / ELIMINAR / QUITAR:
+2. BORRAR/ELIMINAR:
 {{
   "accion": "eliminar",
   "hoja": "horario" (o "actividades" o "etiquetas"),
   "criterio": "texto a eliminar"
 }}
 
-3. Si pide AGREGAR / GUARDAR / CREAR algo nuevo:
+3. AGREGAR NUEVO:
 [
   {{
     "accion": "agregar",
     "tipo": "horario" (o "evento" o "tarea"),
     "categoria_etiqueta": "ramo" (o "proyecto"),
-    "titulo": "Nombre de la materia / actividad",
-    "ramo": "Nombre exacto del ramo o proyecto",
+    "titulo": "Acción específica limpia sin el nombre del ramo",
+    "ramo": "Nombre exacto del ramo/proyecto",
     "dia": "Lunes" (solo para horario),
-    "fecha": "YYYY-MM-DD" (solo para evento/tarea, calculada desde {fecha_actual_str}),
+    "fecha": "YYYY-MM-DD" (solo evento/tarea),
     "hora_inicio": "HH:MM",
     "hora_termino": "HH:MM",
-    "hora": "HH:MM",
-    "sala": "Nombre o número de sala",
+    "hora": "HH:MM" o null,
+    "sala": "Nombre de sala",
     "prioridad": "alta", "media" o "baja",
     "color": "#HEX"
   }}
@@ -251,7 +263,7 @@ FORMATOS JSON DE RESPUESTA:
         
         context.user_data['pending_action'] = parsed_data
         
-        # Construir pre-visualización según la acción
+        # Construir pre-visualización detallada
         if isinstance(parsed_data, dict) and parsed_data.get("accion") == "eliminar":
             preview = f"🗑️ **¿Confirmas ELIMINAR este registro?**\n\n"
             preview += f"• **Hoja:** {parsed_data.get('hoja')}\n"
@@ -262,18 +274,38 @@ FORMATOS JSON DE RESPUESTA:
             preview += f"• **Ramo/Título:** {parsed_data.get('ramo_o_titulo')}\n"
             if parsed_data.get('dia'):
                 preview += f"• **Día:** {parsed_data.get('dia')}\n"
-            preview += f"• **Campo a cambiar:** `{parsed_data.get('campo')}`\n"
+            preview += f"• **Campo:** `{parsed_data.get('campo')}`\n"
             preview += f"• **Nuevo valor:** {parsed_data.get('nuevo_valor')}"
 
         else:
             lista_datos = parsed_data if isinstance(parsed_data, list) else [parsed_data]
             preview = f"📝 **¿Confirmas GUARDAR lo siguiente?**\n\n"
+            advertencias_tope = []
+
             for item in lista_datos:
-                tipo = item.get('tipo', 'tarea')
+                tipo = item.get('tipo', 'tarea').upper()
+                titulo = item.get('titulo', '')
                 ramo = item.get('ramo', 'Personal')
                 cat = item.get('categoria_etiqueta', 'ramo').capitalize()
-                titulo = item.get('titulo', '')
-                preview += f"• **{tipo.upper()}**: {titulo} ({cat}: {ramo})\n"
+                fecha = item.get('fecha') or item.get('dia') or 'Sin fecha'
+                hora = item.get('hora') or (f"{item.get('hora_inicio')} - {item.get('hora_termino')}" if item.get('hora_inicio') else "Todo el día")
+                prio = item.get('prioridad', 'media').capitalize()
+
+                preview += f"• **Tipo:** {tipo}\n"
+                preview += f"  └ **Tarea/Evento:** {titulo}\n"
+                preview += f"  └ **{cat}:** {ramo}\n"
+                preview += f"  └ **Fecha:** {fecha} | **Hora:** {hora}\n"
+                if tipo != "HORARIO":
+                    preview += f"  └ **Prioridad:** {prio}\n"
+
+                # Verificar tope de horario
+                if item.get('fecha') and item.get('hora'):
+                    tope = verificar_tope_horario(item.get('fecha'), item.get('hora'))
+                    if tope:
+                        advertencias_tope.append(f"⚠️ **Aviso de Tope:** La tarea *'{titulo}'* ({item.get('hora')}) {tope}.")
+
+            if advertencias_tope:
+                preview += "\n" + "\n".join(advertencias_tope) + "\n"
 
         keyboard = [
             [
