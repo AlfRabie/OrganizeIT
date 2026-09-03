@@ -73,14 +73,16 @@ def conectar_sheets():
 sh = conectar_sheets()
 sheet_actividades = sh.worksheet("Actividades")
 sheet_horario = sh.worksheet("Horario")
+sheet_etiquetas = sh.worksheet("Etiquetas")
 
 # Cargar Datos
 def cargar_datos():
     df_act = pd.DataFrame(sheet_actividades.get_all_records())
     df_hor = pd.DataFrame(sheet_horario.get_all_records())
-    return df_act, df_hor
+    df_eti = pd.DataFrame(sheet_etiquetas.get_all_records())
+    return df_act, df_hor, df_eti
 
-df_actividades, df_horario = cargar_datos()
+df_actividades, df_horario, df_etiquetas = cargar_datos()
 
 # Generador de archivo .ics para Apple Calendar y Google Calendar
 def generar_ics(df_act, df_hor):
@@ -145,6 +147,84 @@ hoy_dt = datetime.now(tz_chile)
 hoy_nombre = dias_semana[hoy_dt.weekday()]
 hoy_fecha = hoy_dt.date()
 hora_actual = hoy_dt.time()
+
+# ----------------------------------------------------
+# BARRA LATERAL: FORMULARIO RÁPIDO (CERO CONSUMO DE IA)
+# ----------------------------------------------------
+with st.sidebar.expander("➕ Agregar Registro Rápido (Sin IA)", expanded=False):
+    tipo_ingreso = st.radio("¿Qué deseas agregar?", ["Tarea / Evento", "Clase al Horario"])
+    
+    nombres_existentes = list(df_etiquetas["nombre"].dropna().unique()) if not df_etiquetas.empty else []
+    opciones_seleccion = nombres_existentes + ["+ Crear nuevo..."]
+    seleccion = st.selectbox("Ramo o Proyecto:", opciones_seleccion)
+    
+    es_nuevo = (seleccion == "+ Crear nuevo...")
+    
+    if es_nuevo:
+        nombre_final = st.text_input("Nombre del nuevo ramo/proyecto:")
+        categoria_nueva = st.selectbox("Categoría:", ["ramo", "proyecto"])
+        color_nuevo = st.color_picker("Color identificador:", "#4A90E2")
+    else:
+        nombre_final = seleccion
+
+    with st.form("form_registro_directo"):
+        if tipo_ingreso == "Tarea / Evento":
+            titulo_input = st.text_input("Título de la actividad:")
+            subtipo_input = st.selectbox("Tipo:", ["tarea", "evento"])
+            fecha_input = st.date_input("Fecha:", value=hoy_fecha)
+            prioridad_input = st.selectbox("Prioridad:", ["media", "alta", "baja"])
+        else:
+            dia_input = st.selectbox("Día de la semana:", ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes"])
+            col_h1, col_h2 = st.columns(2)
+            with col_h1:
+                h_inicio_input = st.text_input("Hora inicio (HH:MM):", "08:30")
+            with col_h2:
+                h_termino_input = st.text_input("Hora término (HH:MM):", "09:50")
+            sala_input = st.text_input("Sala:", "Por definir")
+
+        submit_directo = st.form_submit_button("💾 Guardar en Google Sheets", use_container_width=True)
+
+        if submit_directo:
+            if not nombre_final or (es_nuevo and not nombre_final.strip()):
+                st.error("Debes ingresar un nombre válido.")
+            else:
+                nombre_final = nombre_final.strip()
+                if es_nuevo:
+                    sheet_etiquetas.append_row([nombre_final, categoria_nueva, color_nuevo])
+                    color_a_usar = color_nuevo
+                else:
+                    fila_match = df_etiquetas[df_etiquetas["nombre"] == nombre_final]
+                    color_a_usar = fila_match.iloc[0]["color"] if not fila_match.empty and fila_match.iloc[0]["color"] else "#4A90E2"
+
+                if tipo_ingreso == "Tarea / Evento":
+                    nuevos_reg = len(sheet_actividades.get_all_records()) + 1
+                    sheet_actividades.append_row([
+                        str(nuevos_reg),
+                        subtipo_input,
+                        titulo_input.strip(),
+                        nombre_final,
+                        str(fecha_input),
+                        "",
+                        prioridad_input,
+                        "pendiente",
+                        color_a_usar
+                    ])
+                    st.success(f"¡Guardado para {nombre_final}!")
+                else:
+                    nuevos_hor = len(sheet_horario.get_all_records()) + 1
+                    sheet_horario.append_row([
+                        str(nuevos_hor),
+                        dia_input,
+                        h_inicio_input.strip(),
+                        h_termino_input.strip(),
+                        nombre_final,
+                        sala_input.strip(),
+                        color_a_usar
+                    ])
+                    st.success(f"¡Horario guardado para {nombre_final}!")
+
+                st.cache_resource.clear()
+                st.rerun()
 
 # ----------------------------------------------------
 # 1. INDICADOR DE CLASE ACTUAL / PRÓXIMA INMEDIATA
