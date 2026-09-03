@@ -384,12 +384,19 @@ else:
     ver_toda_semana = False
 
 if not df_horario.empty:
+    # Asegurar formato homogéneo y ordenar cronológicamente
+    df_horario['hora_inicio_clean'] = df_horario['hora_inicio'].astype(str).str.strip().str.zfill(5)
+    
     if not ver_toda_semana:
         st.caption(f"Clases de hoy (**{hoy_nombre}**):")
         df_mostrar = df_horario[df_horario["dia"].astype(str).str.capitalize() == hoy_nombre].copy()
+        
         if df_mostrar.empty:
             st.success("🎉 ¡No tienes clases programadas para hoy!")
         else:
+            # Ordenar las clases del día de más temprano a más tarde
+            df_mostrar = df_mostrar.sort_values('hora_inicio_clean')
+            
             df_mostrar_mvil = df_mostrar[["hora_inicio", "hora_termino", "ramo", "sala"]].copy()
             df_mostrar_mvil.columns = ["Inicio", "Fin", "Ramo", "Sala"]
             
@@ -406,10 +413,14 @@ if not df_horario.empty:
         for idx, dia in enumerate(dias_lista):
             with cols_dias[idx]:
                 st.markdown(f"### {dia}")
-                df_dia = df_horario[df_horario["dia"].astype(str).str.capitalize() == dia]
+                df_dia = df_horario[df_horario["dia"].astype(str).str.capitalize() == dia].copy()
+                
                 if df_dia.empty:
                     st.caption("*(Sin clases)*")
                 else:
+                    # Ordenar cronológicamente las tarjetas de cada día
+                    df_dia = df_dia.sort_values('hora_inicio_clean')
+                    
                     for _, row in df_dia.iterrows():
                         color_ramo = row.get('color') if row.get('color') else '#4A90E2'
                         sala_txt = row.get('sala') if row.get('sala') else 'Sin sala'
@@ -433,7 +444,6 @@ if not df_horario.empty:
                         )
 else:
     st.info("No hay clases registradas en el horario.")
-
 st.divider()
 
 # ==========================================
